@@ -1,0 +1,146 @@
+const initialBlocks = [
+  { type: 'rapid', x: 0, y: 0, z: .25 },
+  { type: 'rapid', x: 1, y: 1 },
+  { type: 'linear', z: 0, f: 50 },
+  { type: 'linear', y: 5 },
+  { type: 'linear', x: 5 },
+  { type: 'linear', y: 1 },
+  { type: 'linear', x: 1 },
+  { type: 'rapid', z: .25 },
+  { type: 'rapid', x: 0, y: 0 }
+];
+
+let blocks = structuredClone(initialBlocks);
+let selected = 4;
+let running = false;
+
+const $ = (s) => document.querySelector(s);
+const blockList = $('#blockList');
+const plot = $('#plot');
+const typeMeta = {
+  rapid: { code: 'G0', label: 'RAPID', cls: 'rapid' },
+  linear: { code: 'G1', label: 'LINEAR', cls: 'linear' },
+  'arc-cw': { code: 'G2', label: 'ARC CW', cls: 'arc' },
+  'arc-ccw': { code: 'G3', label: 'ARC CCW', cls: 'arc' }
+};
+
+function num(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }
+function fmt(v) { return Number(v).toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1'); }
+function stateAt(index) {
+  const pos = { x: 0, y: 0, z: num($('#safeZ').value) };
+  const states = [];
+  blocks.forEach((b, i) => {
+    const incremental = $('#modeSelect').value === 'G91';
+    ['x','y','z'].forEach(k => {
+      if (b[k] !== undefined) pos[k] = incremental ? pos[k] + num(b[k]) : num(b[k]);
+    });
+    states.push({ ...pos, type: b.type, index: i });
+  });
+  return index === undefined ? states : states[index];
+}
+
+function renderBlocks() {
+  blockList.innerHTML = blocks.map((b, i) => {
+    const meta = typeMeta[b.type];
+    const fields = ['x','y','z'].map(k => `<label class="field"><span>${k.toUpperCase()}</span><input data-key="${k}" type="number" step="0.25" value="${b[k] ?? ''}" placeholder="—" aria-label="${k.toUpperCase()} coordinate"></label>`).join('');
+    const extra = b.type === 'linear' ? `<label class="field"><span>F</span><input data-key="f" type="number" min="1" value="${b.f ?? ''}" placeholder="—" aria-label="Feed rate"></label>` : b.type.startsWith('arc') ? `<label class="field"><span>R</span><input data-key="r" type="number" step="0.25" value="${b.r ?? 1}" aria-label="Arc radius"></label>` : '';
+    return `<div class="block ${selected === i ? 'selected' : ''}" data-index="${i}" tabindex="0"><span class="drag">··</span><span class="line-no">${String(i + 2).padStart(2,'0')}</span><span class="badge">${meta.label}</span><div class="fields">${fields}${extra}</div><button class="delete" aria-label="Delete block">×</button></div>`;
+  }).join('');
+  $('#blockCount').textContent = `${String(blocks.length).padStart(2,'0')} BLOCKS`;
+  bindBlockEvents();
+}
+
+function bindBlockEvents() {
+  document.querySelectorAll('.block').forEach(el => {
+    const index = Number(el.dataset.index);
+    el.addEventListener('click', e => {
+      if (e.target.closest('.delete')) {
+        blocks.splice(index, 1); selected = Math.min(selected, blocks.length - 1); render(); return;
+      }
+      selected = index; render();
+    });
+    el.addEventListener('keydown', e => { if (e.key === 'Enter') { selected = index; render(); } });
+    el.querySelectorAll('input').forEach(input => input.addEventListener('input', e => {
+      e.stopPropagation(); const key = input.dataset.key;
+      if (input.value === '') delete blocks[index][key]; else blocks[index][key] = num(input.value);
+      selected = index; renderCode(); renderPlot();
+    }));
+  });
+}
+
+function gcodeLines() {
+  const lines = [`G54 G17 ${$('#unitsSelect').value} ${$('#modeSelect').value}`];
+  blocks.forEach(b => {
+    const parts = [typeMeta[b.type].code];
+    ['x','y','z','r','f'].forEach(k => { if (b[k] !== undefined) parts.push(k.toUpperCase() + fmt(b[k])); });
+    lines.push(parts.join(' '));
+  });
+  return lines;
+}
+
+function renderCode() {
+  const lines = gcodeLines();
+  $('#preambleCode').textContent = lines[0];
+  $('#codeOutput').innerHTML = lines.map((l, i) => `<span class="code-line ${i === selected + 1 ? 'active' : ''}">${l}</span>`).join('');
+  $('#codeStatus').textContent = `VALID · ${String(lines.length).padStart(2,'0')} LINES`;
+}
+
+function renderPlot() {
+  const states = stateAt();
+  const all = [{x:0,y:0}, ...states];
+  const minX = Math.min(0, ...all.map(p => p.x)), maxX = Math.max(6, ...all.map(p => p.x));
+  const minY = Math.min(0, ...all.map(p => p.y)), maxY = Math.max(6, ...all.map(p => p.y));
+  const pad = 58, w = 600, h = 500;
+  const sx = x => pad + (x - minX) / Math.max(1, maxX - minX) * (w - pad * 2);
+  const sy = y => h - pad - (y - minY) / Math.max(1, maxY - minY) * (h - pad * 2);
+  let svg = `<rect width="600" height="500" fill="#fbfaf6"/>`;
+  for (let i = Math.ceil(minX); i <= Math.floor(maxX); i++) svg += `<line x1="${sx(i)}" y1="${pad}" x2="${sx(i)}" y2="${h-pad}" stroke="#ddd9d0" stroke-width="1"/><text x="${sx(i)}" y="${h-28}" text-anchor="middle" font-size="12" fill="#77736b" font-family="monospace">X${i}</text>`;
+  for (let i = Math.ceil(minY); i <= Math.floor(maxY); i++) svg += `<line x1="${pad}" y1="${sy(i)}" x2="${w-pad}" y2="${sy(i)}" stroke="#ddd9d0" stroke-width="1"/><text x="28" y="${sy(i)+4}" text-anchor="middle" font-size="12" fill="#77736b" font-family="monospace">Y${i}</text>`;
+  let prev = {x:0,y:0,z:num($('#safeZ').value)};
+  let length = 0;
+  states.forEach((p, i) => {
+    const movedXY = p.x !== prev.x || p.y !== prev.y;
+    if (movedXY) {
+      const isRapid = p.type === 'rapid';
+      const active = i === selected;
+      const dist = Math.hypot(p.x-prev.x, p.y-prev.y); length += dist;
+      svg += `<line class="path-segment" data-index="${i}" x1="${sx(prev.x)}" y1="${sy(prev.y)}" x2="${sx(p.x)}" y2="${sy(p.y)}" stroke="${active ? '#e14b32' : isRapid ? '#6d86b4' : '#1b1b19'}" stroke-width="${active ? 5 : isRapid ? 2 : 3}" ${isRapid ? 'stroke-dasharray="7 6"' : ''} stroke-linecap="round"/>`;
+    }
+    if (i === selected) svg += `<circle cx="${sx(p.x)}" cy="${sy(p.y)}" r="7" fill="#fbfaf6" stroke="#e14b32" stroke-width="3"/>`;
+    prev = p;
+  });
+  svg += `<circle id="toolDot" cx="${sx(states[selected]?.x ?? 0)}" cy="${sy(states[selected]?.y ?? 0)}" r="5" fill="#e14b32"/>`;
+  svg += `<path d="M${sx(0)-7} ${sy(0)}h14M${sx(0)} ${sy(0)-7}v14" stroke="#1b1b19" stroke-width="2"/><text x="${sx(0)+10}" y="${sy(0)-10}" font-size="11" fill="#1b1b19" font-family="monospace">ORIGIN</text>`;
+  plot.innerHTML = svg;
+  const current = states[selected] || {x:0,y:0,z:0};
+  $('#cursorReadout').innerHTML = `X ${num(current.x).toFixed(2)}&nbsp;&nbsp;Y ${num(current.y).toFixed(2)}`;
+  $('#zReadout').textContent = num(current.z).toFixed(2);
+  $('#pathLength').textContent = `${length.toFixed(1)} ${$('#unitsSelect').value === 'G20' ? 'IN' : 'MM'}`;
+  plot.querySelectorAll('.path-segment').forEach(seg => seg.addEventListener('click', () => { selected = Number(seg.dataset.index); render(); }));
+}
+
+function render() { renderBlocks(); renderCode(); renderPlot(); }
+function addBlock(type) {
+  const last = stateAt(blocks.length - 1) || {x:0,y:0,z:0};
+  const b = type === 'rapid' ? {type, x:last.x, y:last.y, z:last.z} : type === 'linear' ? {type, x:last.x, y:last.y, f:num($('#defaultFeed').value)} : {type, x:last.x + 1, y:last.y, r:1, f:num($('#defaultFeed').value)};
+  blocks.push(b); selected = blocks.length - 1; render();
+  setTimeout(() => blockList.lastElementChild?.scrollIntoView({behavior:'smooth',block:'center'}), 30);
+}
+function toast(message) { const t=$('#toast'); t.textContent=message; t.classList.add('show'); clearTimeout(t._timer); t._timer=setTimeout(()=>t.classList.remove('show'),1800); }
+
+$('#commandList').addEventListener('click', e => { const b=e.target.closest('[data-type]'); if(b) addBlock(b.dataset.type); });
+$('#addLinear').addEventListener('click', () => addBlock('linear'));
+['unitsSelect','modeSelect','safeZ','defaultFeed'].forEach(id => $('#'+id).addEventListener('input', render));
+$('#fitButton').addEventListener('click', () => { renderPlot(); toast('VIEW FIT TO TOOLPATH'); });
+$('#copyButton').addEventListener('click', async () => { await navigator.clipboard.writeText(gcodeLines().join('\n')); toast('G-CODE COPIED'); });
+$('#exportButton').addEventListener('click', () => {
+  const blob = new Blob([gcodeLines().join('\n')+'\n'], {type:'text/plain'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=($('#programName').textContent.trim()||'program').toLowerCase()+'.nc'; a.click(); URL.revokeObjectURL(a.href); toast('PROGRAM EXPORTED');
+});
+$('#newButton').addEventListener('click', () => { blocks=[]; selected=-1; render(); toast('NEW PROGRAM'); });
+$('#playButton').addEventListener('click', async () => {
+  if(running || !blocks.length) return; running=true; $('#playButton').textContent='■ STOP';
+  for(let i=0;i<blocks.length && running;i++){ selected=i; render(); await new Promise(r=>setTimeout(r,360)); }
+  running=false; $('#playButton').textContent='▶ RUN';
+});
+
+render();

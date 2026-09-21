@@ -45,8 +45,10 @@
           <label>SAFE Z<input id="safeZ" type="number" value="0.25" step="0.05"></label>
           <label>FEED<input id="defaultFeed" type="number" value="50" min="1"></label>
         </div>
+        <label>GRID INCREMENTS
+          <select id="gridStep"><option value="0.25">0.25</option><option value="0.5">0.50</option><option value="1" selected>1.00</option><option value="2">2.00</option></select>
+        </label>
       </div>
-      <p class="key"><span class="line-key rapid"></span>RAPID <span class="line-key cut"></span>CUTTING</p>
     </aside>
 
     <section class="program panel-border-right">
@@ -68,7 +70,10 @@
       </div>
       <div id="codePane" class="editor-pane code-pane" role="tabpanel" aria-labelledby="codeTab" hidden>
         <div class="code-editor-head"><span>EDIT RAW G-CODE</span><span>CHANGES UPDATE BLOCKS + PREVIEW</span></div>
-        <textarea id="codeEditor" aria-label="Editable G-code" spellcheck="false" wrap="off"></textarea>
+        <div class="code-editor-stack">
+          <pre id="codeHighlight" aria-hidden="true"></pre>
+          <textarea id="codeEditor" aria-label="Editable G-code" spellcheck="false" wrap="off"></textarea>
+        </div>
         <div class="code-editor-foot"><span id="codeStatus">VALID · 10 LINES</span><span>G0–G3 · X Y Z F R</span></div>
       </div>
     </section>

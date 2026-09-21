@@ -15,6 +15,7 @@ let selected = 4;
 let running = false;
 let editorMode = 'blocks';
 let codeValid = true;
+let codeLineMap = initialBlocks.map((_, i) => i + 1);
 
 const $ = (s) => document.querySelector(s);
 const blockList = $('#blockList');
@@ -98,8 +99,26 @@ function renderCode() {
   const lines = gcodeLines();
   $('#preambleCode').textContent = lines[0];
   $('#codeEditor').value = lines.join('\n');
+  codeLineMap = blocks.map((_, i) => i + 1);
   codeValid = true;
+  renderCodeHighlight(selected);
   updateCodeStatus(lines.length);
+}
+
+function escapeHtml(value) {
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function renderCodeHighlight(activeBlock = selected) {
+  const activeLine = codeLineMap[activeBlock];
+  const lines = $('#codeEditor').value.split(/\r?\n/);
+  $('#codeHighlight').innerHTML = lines.map((line, i) => `<span class="code-source-line ${i === activeLine ? 'active' : ''}">${escapeHtml(line) || ' '}</span>`).join('');
+  syncCodeScroll();
+}
+
+function syncCodeScroll() {
+  $('#codeHighlight').scrollTop = $('#codeEditor').scrollTop;
+  $('#codeHighlight').scrollLeft = $('#codeEditor').scrollLeft;
 }
 
 function updateCodeStatus(lineCount, error = '') {
@@ -112,6 +131,7 @@ function updateCodeStatus(lineCount, error = '') {
 function parseCode(text) {
   const lines = text.split(/\r?\n/);
   const parsed = [];
+  const lineMap = [];
   let units = $('#unitsSelect').value;
   let mode = $('#modeSelect').value;
   for (let i = 0; i < lines.length; i++) {
@@ -133,11 +153,13 @@ function parseCode(text) {
     let token;
     while ((token = tokenPattern.exec(clean))) block[token[1].toLowerCase()] = num(token[2]);
     parsed.push(block);
+    lineMap.push(i);
   }
-  return { blocks: parsed, units, mode, lineCount: lines.filter(line => line.trim()).length };
+  return { blocks: parsed, units, mode, lineMap, lineCount: lines.filter(line => line.trim()).length };
 }
 
 function applyCodeInput() {
+  renderCodeHighlight(selected);
   const result = parseCode($('#codeEditor').value);
   if (result.error) {
     codeValid = false;
@@ -146,11 +168,13 @@ function applyCodeInput() {
   }
   codeValid = true;
   blocks = result.blocks;
+  codeLineMap = result.lineMap;
   selected = Math.min(Math.max(selected, 0), blocks.length - 1);
   $('#unitsSelect').value = result.units;
   $('#modeSelect').value = result.mode;
   renderBlocks();
   renderPlot();
+  renderCodeHighlight(selected);
   updateCodeStatus(result.lineCount);
 }
 
@@ -175,14 +199,17 @@ function setEditorMode(mode) {
 function renderPlot() {
   const states = stateAt();
   const all = [{x:0,y:0}, ...states];
+  const gridStep = Math.max(.01, num($('#gridStep').value) || 1);
   const minX = Math.min(0, ...all.map(p => p.x)), maxX = Math.max(6, ...all.map(p => p.x));
   const minY = Math.min(0, ...all.map(p => p.y)), maxY = Math.max(6, ...all.map(p => p.y));
   const pad = 58, w = 600, h = 500;
   const sx = x => pad + (x - minX) / Math.max(1, maxX - minX) * (w - pad * 2);
   const sy = y => h - pad - (y - minY) / Math.max(1, maxY - minY) * (h - pad * 2);
   let svg = `<rect width="600" height="500" fill="#fbfaf6"/>`;
-  for (let i = Math.ceil(minX); i <= Math.floor(maxX); i++) svg += `<line x1="${sx(i)}" y1="${pad}" x2="${sx(i)}" y2="${h-pad}" stroke="#ddd9d0" stroke-width="1"/><text x="${sx(i)}" y="${h-28}" text-anchor="middle" font-size="12" fill="#77736b" font-family="monospace">X${i}</text>`;
-  for (let i = Math.ceil(minY); i <= Math.floor(maxY); i++) svg += `<line x1="${pad}" y1="${sy(i)}" x2="${w-pad}" y2="${sy(i)}" stroke="#ddd9d0" stroke-width="1"/><text x="28" y="${sy(i)+4}" text-anchor="middle" font-size="12" fill="#77736b" font-family="monospace">Y${i}</text>`;
+  const startX = Math.ceil(minX / gridStep) * gridStep;
+  const startY = Math.ceil(minY / gridStep) * gridStep;
+  for (let i = startX, n = 0; i <= maxX + gridStep / 100 && n < 100; i += gridStep, n++) { const v = Number(i.toFixed(6)); svg += `<line x1="${sx(v)}" y1="${pad}" x2="${sx(v)}" y2="${h-pad}" stroke="#ddd9d0" stroke-width="1"/><text x="${sx(v)}" y="${h-28}" text-anchor="middle" font-size="12" fill="#77736b" font-family="monospace">X${fmt(v)}</text>`; }
+  for (let i = startY, n = 0; i <= maxY + gridStep / 100 && n < 100; i += gridStep, n++) { const v = Number(i.toFixed(6)); svg += `<line x1="${pad}" y1="${sy(v)}" x2="${w-pad}" y2="${sy(v)}" stroke="#ddd9d0" stroke-width="1"/><text x="28" y="${sy(v)+4}" text-anchor="middle" font-size="12" fill="#77736b" font-family="monospace">Y${fmt(v)}</text>`; }
   let prev = {x:0,y:0,z:num($('#safeZ').value)};
   let length = 0;
   states.forEach((p, i) => {
@@ -203,7 +230,19 @@ function renderPlot() {
   $('#cursorReadout').innerHTML = `X ${num(current.x).toFixed(2)}&nbsp;&nbsp;Y ${num(current.y).toFixed(2)}`;
   $('#zReadout').textContent = num(current.z).toFixed(2);
   $('#pathLength').textContent = `${length.toFixed(1)} ${$('#unitsSelect').value === 'G20' ? 'IN' : 'MM'}`;
-  plot.querySelectorAll('.path-segment').forEach(seg => seg.addEventListener('click', () => { selected = Number(seg.dataset.index); render(); }));
+  plot.querySelectorAll('.path-segment').forEach(seg => {
+    const selectSegment = () => {
+      selected = Number(seg.dataset.index);
+      plot.querySelectorAll('.path-segment').forEach(path => path.classList.toggle('hovered', path === seg));
+      document.querySelectorAll('.block').forEach((block, i) => block.classList.toggle('path-hover', i === selected));
+      renderCodeHighlight(selected);
+      const point = states[selected] || {x:0,y:0,z:0};
+      $('#cursorReadout').innerHTML = `X ${num(point.x).toFixed(2)}&nbsp;&nbsp;Y ${num(point.y).toFixed(2)}`;
+      $('#zReadout').textContent = num(point.z).toFixed(2);
+    };
+    seg.addEventListener('mouseenter', selectSegment);
+    seg.addEventListener('click', selectSegment);
+  });
 }
 
 function render() { renderBlocks(); renderCode(); renderPlot(); }
@@ -221,7 +260,8 @@ $('#addLinear').addEventListener('click', () => addBlock('linear'));
 $('#blocksTab').addEventListener('click', () => setEditorMode('blocks'));
 $('#codeTab').addEventListener('click', () => setEditorMode('code'));
 $('#codeEditor').addEventListener('input', applyCodeInput);
-['unitsSelect','modeSelect','safeZ','defaultFeed'].forEach(id => $('#'+id).addEventListener('input', render));
+$('#codeEditor').addEventListener('scroll', syncCodeScroll);
+['unitsSelect','modeSelect','safeZ','defaultFeed','gridStep'].forEach(id => $('#'+id).addEventListener('input', render));
 $('#fitButton').addEventListener('click', () => { renderPlot(); toast('VIEW FIT TO TOOLPATH'); });
 $('#copyButton').addEventListener('click', async () => { await navigator.clipboard.writeText(currentCodeText()); toast('G-CODE COPIED'); });
 $('#exportButton').addEventListener('click', () => {

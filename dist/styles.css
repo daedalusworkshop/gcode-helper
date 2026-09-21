@@ -53,6 +53,12 @@ nav { display: flex; gap: 8px; }
 .preamble { min-height: 57px; display: grid; grid-template-columns: 18px 34px 68px 1fr; align-items: center; padding: 0 14px; border-bottom: 1px solid var(--rule); font-size: .72rem; background: #ebe7dd; }
 .drag { color: var(--muted); letter-spacing: -2px; }.line-no { color: var(--muted); }
 .badge { display: inline-block; width: max-content; padding: 5px 7px; border: 1px solid var(--ink); font-size: .62rem; font-weight: 700; }
+.motion-toggle { min-width: 62px; padding: 4px 6px; background: transparent; text-align: left; line-height: 1.05; }
+.motion-toggle span, .motion-toggle small { display: block; }
+.motion-toggle span { font-size: .7rem; }
+.motion-toggle small { margin-top: 3px; color: var(--muted); font-size: .52rem; font-weight: 400; }
+.motion-toggle:hover, .motion-toggle:focus-visible { color: var(--paper); background: var(--ink); border-color: var(--ink); outline: none; }
+.motion-toggle:hover small, .motion-toggle:focus-visible small { color: var(--paper); }
 .setup-badge { background: var(--ink); color: var(--paper); }
 .block { position: relative; display: grid; grid-template-columns: 18px 34px 76px 1fr 24px; min-height: 68px; align-items: center; padding: 8px 14px; border: 0; border-bottom: 1px solid var(--rule); background: transparent; width: 100%; text-align: left; }
 .block:hover { background: var(--white); }.block.selected { background: var(--white); box-shadow: inset 3px 0 var(--signal); }

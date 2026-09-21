@@ -44,7 +44,10 @@ function renderBlocks() {
     const meta = typeMeta[b.type];
     const fields = ['x','y','z'].map(k => `<label class="field"><span>${k.toUpperCase()}</span><input data-key="${k}" type="number" step="0.25" value="${b[k] ?? ''}" placeholder="—" aria-label="${k.toUpperCase()} coordinate"></label>`).join('');
     const extra = b.type === 'linear' ? `<label class="field"><span>F</span><input data-key="f" type="number" min="1" value="${b.f ?? ''}" placeholder="—" aria-label="Feed rate"></label>` : b.type.startsWith('arc') ? `<label class="field"><span>R</span><input data-key="r" type="number" step="0.25" value="${b.r ?? 1}" aria-label="Arc radius"></label>` : '';
-    return `<div class="block ${selected === i ? 'selected' : ''}" data-index="${i}" tabindex="0"><span class="drag">··</span><span class="line-no">${String(i + 2).padStart(2,'0')}</span><span class="badge">${meta.label}</span><div class="fields">${fields}${extra}</div><button class="delete" aria-label="Delete block">×</button></div>`;
+    const typeControl = b.type === 'rapid' || b.type === 'linear'
+      ? `<button type="button" class="badge motion-toggle" title="Toggle between G0 and G1" aria-label="Change ${meta.code} to ${b.type === 'rapid' ? 'G1' : 'G0'}"><span>${meta.code}</span><small>${meta.label}</small></button>`
+      : `<span class="badge">${meta.label}</span>`;
+    return `<div class="block ${selected === i ? 'selected' : ''}" data-index="${i}" tabindex="0"><span class="drag">··</span><span class="line-no">${String(i + 2).padStart(2,'0')}</span>${typeControl}<div class="fields">${fields}${extra}</div><button class="delete" aria-label="Delete block">×</button></div>`;
   }).join('');
   $('#blockCount').textContent = `${String(blocks.length).padStart(2,'0')} BLOCKS`;
   bindBlockEvents();
@@ -56,6 +59,17 @@ function bindBlockEvents() {
     el.addEventListener('click', e => {
       if (e.target.closest('.delete')) {
         blocks.splice(index, 1); selected = Math.min(selected, blocks.length - 1); render(); return;
+      }
+      if (e.target.closest('.motion-toggle')) {
+        blocks[index].type = blocks[index].type === 'rapid' ? 'linear' : 'rapid';
+        if (blocks[index].type === 'linear' && blocks[index].f === undefined) blocks[index].f = num($('#defaultFeed').value);
+        if (blocks[index].type === 'rapid') delete blocks[index].f;
+        selected = index; render(); return;
+      }
+      if (e.target.closest('input')) {
+        selected = index;
+        document.querySelectorAll('.block').forEach((block, i) => block.classList.toggle('selected', i === selected));
+        renderCode(); renderPlot(); return;
       }
       selected = index; render();
     });

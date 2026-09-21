@@ -51,16 +51,26 @@
 
     <section class="program panel-border-right">
       <div class="panel-heading sticky-heading">
-        <span>02 / PROGRAM</span>
-        <span id="blockCount">09 BLOCKS</span>
+        <div class="editor-tabs" role="tablist" aria-label="Program editor view">
+          <button id="blocksTab" class="editor-tab active" role="tab" aria-selected="true">02 / BLOCKS</button>
+          <button id="codeTab" class="editor-tab" role="tab" aria-selected="false">04 / CODE</button>
+        </div>
+        <span id="editorMeta">09 BLOCKS</span>
       </div>
-      <div class="preamble">
-        <span class="drag">··</span><span class="line-no">01</span><span class="badge setup-badge">SETUP</span>
-        <code id="preambleCode">G54 G17 G20 G90</code>
+      <div id="blocksPane" class="editor-pane blocks-pane" role="tabpanel" aria-labelledby="blocksTab">
+        <div class="preamble">
+          <span class="drag">··</span><span class="line-no">01</span><span class="badge setup-badge">SETUP</span>
+          <code id="preambleCode">G54 G17 G20 G90</code>
+        </div>
+        <div id="blockList" class="block-list" aria-live="polite"></div>
+        <button id="addLinear" class="add-row">＋ ADD LINEAR MOVE</button>
+        <div class="tip"><strong>MODAL CODE</strong><p>Unchanged coordinates are omitted from the output. The machine remembers their previous values.</p></div>
       </div>
-      <div id="blockList" class="block-list" aria-live="polite"></div>
-      <button id="addLinear" class="add-row">＋ ADD LINEAR MOVE</button>
-      <div class="tip"><strong>MODAL CODE</strong><p>Unchanged coordinates are omitted from the output. The machine remembers their previous values.</p></div>
+      <div id="codePane" class="editor-pane code-pane" role="tabpanel" aria-labelledby="codeTab" hidden>
+        <div class="code-editor-head"><span>EDIT RAW G-CODE</span><span>CHANGES UPDATE BLOCKS + PREVIEW</span></div>
+        <textarea id="codeEditor" aria-label="Editable G-code" spellcheck="false" wrap="off"></textarea>
+        <div class="code-editor-foot"><span id="codeStatus">VALID · 10 LINES</span><span>G0–G3 · X Y Z F R</span></div>
+      </div>
     </section>
 
     <section class="output">
@@ -76,10 +86,6 @@
           <svg id="plot" viewBox="0 0 600 500" role="img" aria-label="XY toolpath preview"></svg>
           <div class="plot-readout"><span id="cursorReadout">X 1.00&nbsp;&nbsp;Y 1.00</span><span>Z <b id="zReadout">0.00</b></span></div>
         </div>
-      </div>
-      <div class="code-section">
-        <div class="panel-heading"><span>04 / G-CODE</span><span id="codeStatus">VALID · 09 LINES</span></div>
-        <pre id="codeOutput" tabindex="0"></pre>
       </div>
       <footer><span>READY</span><span>EST. PATH <b id="pathLength">16.0 IN</b></span></footer>
     </section>

@@ -22,6 +22,24 @@
       <label>Grid
         <select id="gridStep"><option value="0.25">0.25</option><option value="0.5">0.5</option><option value="1" selected>1</option><option value="2">2</option></select>
       </label>
+      <label>Vim
+        <input type="checkbox" id="vimToggle">
+      </label>
+      <div class="photo">
+        <input type="file" id="refFile" accept="image/*" hidden>
+        <button type="button" class="photo-import" id="refImportBtn">+ Reference photo</button>
+        <div id="refControls" class="photo-controls" hidden>
+          <label>Opacity <span id="refOpacityVal">50%</span>
+            <input id="refOpacity" type="range" min="0" max="100" value="50">
+          </label>
+          <div class="photo-pos">
+            <label>X<input id="refX" type="number" step="0.1"></label>
+            <label>Y<input id="refY" type="number" step="0.1"></label>
+            <label>W<input id="refW" type="number" step="0.1" min="0.1"></label>
+          </div>
+          <button type="button" class="text-button" id="refRemoveBtn">Remove photo</button>
+        </div>
+      </div>
       <dl class="ref">
         <div><dt>G0</dt><dd>rapid move</dd></div>
         <div><dt>G1</dt><dd>straight move</dd></div>
@@ -36,6 +54,7 @@
     <pre id="codeHighlight" aria-hidden="true"></pre>
     <textarea id="codeEditor" aria-label="G-code" spellcheck="false" wrap="off"></textarea>
     <div id="codeStatus" hidden></div>
+    <div id="vimMode" class="vim-mode-badge" hidden></div>
   </section>
 
   <section class="preview">

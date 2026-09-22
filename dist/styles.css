@@ -32,6 +32,21 @@ button { cursor: pointer; }
 .side-body { width: 190px; padding: 20px 14px 14px; display: flex; flex-direction: column; gap: 14px; }
 .side label { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: .78rem; color: var(--muted); }
 .side select, .side input { width: 78px; height: 30px; background: var(--white); border: 1px solid var(--rule); padding: 0 6px; font-size: .78rem; color: var(--ink); }
+.side input[type="checkbox"] { width: 15px; height: 15px; padding: 0; border: 1px solid var(--rule); accent-color: var(--ink); }
+
+.photo { margin: 8px 0 0; padding-top: 16px; border-top: 1px solid var(--rule); }
+.photo-import { width: 100%; padding: 8px 0; border: 1px dashed var(--rule); background: transparent; color: var(--muted); font-size: .74rem; text-align: center; }
+.photo-import:hover { border-color: var(--ink); color: var(--ink); }
+.photo-controls { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+.photo-controls[hidden] { display: none; }
+.photo-controls label { display: flex; flex-direction: column; gap: 5px; font-size: .72rem; color: var(--muted); }
+.photo-controls label > span { display: flex; justify-content: space-between; }
+.photo-controls input[type="range"] { width: 100%; height: 16px; padding: 0; background: transparent; accent-color: var(--ink); }
+.photo-pos { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.photo-pos label { flex-direction: row; align-items: center; justify-content: space-between; }
+.photo-pos input { width: 100%; min-width: 0; }
+#refRemoveBtn { align-self: flex-start; padding: 4px 0; color: var(--muted); }
+#refRemoveBtn:hover { color: var(--signal); }
 
 .ref { margin: 8px 0 0; padding-top: 16px; border-top: 1px solid var(--rule); display: flex; flex-direction: column; gap: 10px; font-size: .78rem; }
 .ref div { display: flex; gap: 12px; }
@@ -49,6 +64,9 @@ button { cursor: pointer; }
 #codeHighlight .code-error { background: rgba(255, 118, 95, .22); border-radius: 2px; text-decoration: underline wavy #ff765f; text-underline-offset: 4px; }
 #codeStatus { position: absolute; left: 22px; bottom: 16px; z-index: 3; color: #ff765f; font-size: .78rem; pointer-events: none; }
 #codeStatus[hidden] { display: none; }
+.vim-cursor { position: absolute; background: rgba(225, 75, 50, .55); pointer-events: none; }
+.vim-mode-badge { position: absolute; right: 16px; top: 14px; z-index: 3; color: var(--muted); font-size: .68rem; letter-spacing: .1em; padding: 3px 7px; border: 1px solid #41423f; pointer-events: none; }
+.vim-mode-badge[hidden] { display: none; }
 
 .preview { position: relative; min-width: 0; background: var(--white); border-left: 1px solid var(--ink); }
 #plot { display: block; width: 100%; height: 100%; }
@@ -66,6 +84,9 @@ button { cursor: pointer; }
 .path-hit { fill: none; stroke: transparent; stroke-width: 14; pointer-events: stroke; }
 .path-visible { fill: none; pointer-events: none; transition: stroke .1s ease, stroke-width .1s ease; }
 .path-group.hovered .path-visible { stroke: var(--signal); stroke-width: 5; stroke-opacity: 1; }
+
+#refImgEl { cursor: move; }
+#refImgEl:active { cursor: grabbing; }
 
 .toast { position: fixed; right: 18px; bottom: 60px; padding: 9px 12px; background: var(--signal); color: white; font-size: .78rem; transform: translateY(20px); opacity: 0; transition: .2s ease; z-index: 20; pointer-events: none; }
 .toast.show { transform: translateY(0); opacity: 1; }

@@ -3,98 +3,53 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="A visual block editor for learning and writing G-code.">
   <title>GCODE Helper</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%23f4f1e8'/%3E%3Cpath d='M13 14h38v36H13zM22 25h20M22 33h20M22 41h12' fill='none' stroke='%231b1b19' stroke-width='4'/%3E%3Ccircle cx='46' cy='41' r='4' fill='%23e14b32'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
-  <header class="topbar">
-    <a class="wordmark" href="#" aria-label="GCODE Helper home"><span class="mark">GH</span> GCODE HELPER</a>
-    <div class="doc-title"><span class="status-dot"></span><span id="programName" contenteditable="true" spellcheck="false">RECTANGLE_01</span></div>
-    <nav aria-label="File actions">
-      <button class="text-button" id="newButton">NEW</button>
-      <button class="text-button" id="copyButton">COPY G-CODE</button>
-      <button class="solid-button" id="exportButton">EXPORT .NC ↓</button>
-    </nav>
-  </header>
+  <aside id="side" class="side">
+    <div class="side-body">
+      <label>Units
+        <select id="unitsSelect"><option value="G20" selected>in</option><option value="G21">mm</option></select>
+      </label>
+      <label>Mode
+        <select id="modeSelect"><option value="G90" selected>abs</option><option value="G91">inc</option></select>
+      </label>
+      <label>Safe Z
+        <input id="safeZ" type="number" value="0.25" step="0.05">
+      </label>
+      <label>Grid
+        <select id="gridStep"><option value="0.25">0.25</option><option value="0.5">0.5</option><option value="1" selected>1</option><option value="2">2</option></select>
+      </label>
+      <dl class="ref">
+        <div><dt>G0</dt><dd>rapid move</dd></div>
+        <div><dt>G1</dt><dd>straight move</dd></div>
+        <div><dt>G2</dt><dd>arc · CW</dd></div>
+        <div><dt>G3</dt><dd>arc · CCW</dd></div>
+      </dl>
+    </div>
+  </aside>
+  <button id="sideToggle" class="side-toggle" aria-label="Toggle setup" aria-expanded="true"></button>
 
-  <main class="workspace">
-    <aside class="library panel-border-right">
-      <div class="panel-heading">
-        <span>01 / COMMANDS</span>
-        <button class="help" title="Add a command to the end of the program" aria-label="About commands">?</button>
-      </div>
-      <p class="aside-note">Add an operation. Each block writes one line of machine code.</p>
-      <div class="command-list" id="commandList">
-        <button class="command" data-type="rapid"><span class="command-code">G0</span><span><strong>Rapid move</strong><small>Position without cutting</small></span><b>+</b></button>
-        <button class="command" data-type="linear"><span class="command-code">G1</span><span><strong>Linear cut</strong><small>Move at feed rate</small></span><b>+</b></button>
-        <button class="command" data-type="arc-cw"><span class="command-code">G2</span><span><strong>Arc · CW</strong><small>Clockwise radius</small></span><b>+</b></button>
-        <button class="command" data-type="arc-ccw"><span class="command-code">G3</span><span><strong>Arc · CCW</strong><small>Counterclockwise radius</small></span><b>+</b></button>
-      </div>
+  <section class="code">
+    <pre id="codeHighlight" aria-hidden="true"></pre>
+    <textarea id="codeEditor" aria-label="G-code" spellcheck="false" wrap="off"></textarea>
+    <div id="codeStatus" hidden></div>
+  </section>
 
-      <div class="setup">
-        <div class="panel-heading"><span>SETUP</span></div>
-        <label>UNITS
-          <select id="unitsSelect"><option value="G20">INCHES · G20</option><option value="G21">MILLIMETERS · G21</option></select>
-        </label>
-        <label>DISTANCE
-          <select id="modeSelect"><option value="G90">ABSOLUTE · G90</option><option value="G91">INCREMENTAL · G91</option></select>
-        </label>
-        <div class="setup-pair">
-          <label>SAFE Z<input id="safeZ" type="number" value="0.25" step="0.05"></label>
-          <label>FEED<input id="defaultFeed" type="number" value="50" min="1"></label>
-        </div>
-        <label>GRID INCREMENTS
-          <select id="gridStep"><option value="0.25">0.25</option><option value="0.5">0.50</option><option value="1" selected>1.00</option><option value="2">2.00</option></select>
-        </label>
-      </div>
-    </aside>
-
-    <section class="program panel-border-right">
-      <div class="panel-heading sticky-heading">
-        <div class="editor-tabs" role="tablist" aria-label="Program editor view">
-          <button id="blocksTab" class="editor-tab active" role="tab" aria-selected="true">02 / BLOCKS</button>
-          <button id="codeTab" class="editor-tab" role="tab" aria-selected="false">04 / CODE</button>
-        </div>
-        <span id="editorMeta">09 BLOCKS</span>
-      </div>
-      <div id="blocksPane" class="editor-pane blocks-pane" role="tabpanel" aria-labelledby="blocksTab">
-        <div class="preamble">
-          <span class="drag">··</span><span class="line-no">01</span><span class="badge setup-badge">SETUP</span>
-          <code id="preambleCode">G54 G17 G20 G90</code>
-        </div>
-        <div id="blockList" class="block-list" aria-live="polite"></div>
-        <button id="addLinear" class="add-row">＋ ADD LINEAR MOVE</button>
-        <div class="tip"><strong>MODAL CODE</strong><p>Unchanged coordinates are omitted from the output. The machine remembers their previous values.</p></div>
-      </div>
-      <div id="codePane" class="editor-pane code-pane" role="tabpanel" aria-labelledby="codeTab" hidden>
-        <div class="code-editor-head"><span>EDIT RAW G-CODE</span><span>CHANGES UPDATE BLOCKS + PREVIEW</span></div>
-        <div class="code-editor-stack">
-          <pre id="codeHighlight" aria-hidden="true"></pre>
-          <textarea id="codeEditor" aria-label="Editable G-code" spellcheck="false" wrap="off"></textarea>
-        </div>
-        <div class="code-editor-foot"><span id="codeStatus">VALID · 10 LINES</span><span>G0–G3 · X Y Z F R</span></div>
-      </div>
-    </section>
-
-    <section class="output">
-      <div class="preview-section">
-        <div class="panel-heading">
-          <span>03 / XY PREVIEW</span>
-          <div class="preview-controls">
-            <button id="fitButton" class="mini-button">FIT</button>
-            <button id="playButton" class="mini-button primary">▶ RUN</button>
-          </div>
-        </div>
-        <div class="plot-wrap">
-          <svg id="plot" viewBox="0 0 600 500" role="img" aria-label="XY toolpath preview"></svg>
-          <div class="plot-readout"><span id="cursorReadout">X 1.00&nbsp;&nbsp;Y 1.00</span><span>Z <b id="zReadout">0.00</b></span></div>
-        </div>
-      </div>
-      <footer><span>READY</span><span>EST. PATH <b id="pathLength">16.0 IN</b></span></footer>
-    </section>
-  </main>
+  <section class="preview">
+    <div class="corner top">
+      <button class="text-button" id="newButton">New</button>
+      <button class="text-button" id="copyButton">Copy</button>
+      <button class="text-button" id="exportButton">Export</button>
+    </div>
+    <svg id="plot" viewBox="0 0 560 560" role="img" aria-label="XY toolpath"></svg>
+    <div class="corner bottom">
+      <div class="readout"><span id="cursorReadout"></span><span id="zReadout"></span><span id="pathLength"></span></div>
+      <button class="solid-button" id="playButton">Run</button>
+    </div>
+  </section>
 
   <div class="toast" id="toast" role="status"></div>
   <script src="./app.js"></script>

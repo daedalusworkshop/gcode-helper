@@ -10,268 +10,496 @@ const initialBlocks = [
   { type: 'rapid', x: 0, y: 0 }
 ];
 
-let blocks = structuredClone(initialBlocks);
-let selected = 4;
+const SIZE = 6;
+let blocks = [];
+let selected = -1;
 let running = false;
-let editorMode = 'blocks';
 let codeValid = true;
-let codeLineMap = initialBlocks.map((_, i) => i + 1);
+let codeError = null;
+let codeLineMap = [];
+let hoveredPathIndex = -1;
+let lastActiveIndex = -1;
+const commandFields = {
+  G0: ['X', 'Y', 'Z'],
+  G1: ['X', 'Y', 'Z', 'F'],
+  G2: ['X', 'Y', 'Z', 'R', 'F'],
+  G3: ['X', 'Y', 'Z', 'R', 'F']
+};
+const typeCode = { rapid: 'G0', linear: 'G1', 'arc-cw': 'G2', 'arc-ccw': 'G3' };
 
 const $ = (s) => document.querySelector(s);
-const blockList = $('#blockList');
+const editor = $('#codeEditor');
 const plot = $('#plot');
-const typeMeta = {
-  rapid: { code: 'G0', label: 'RAPID', cls: 'rapid' },
-  linear: { code: 'G1', label: 'LINEAR', cls: 'linear' },
-  'arc-cw': { code: 'G2', label: 'ARC CW', cls: 'arc' },
-  'arc-ccw': { code: 'G3', label: 'ARC CCW', cls: 'arc' }
-};
 
 function num(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }
 function fmt(v) { return Number(v).toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1'); }
-function stateAt(index) {
+function clamp(v) { return Math.min(SIZE, Math.max(0, v)); }
+
+function stateAt() {
   const pos = { x: 0, y: 0, z: num($('#safeZ').value) };
-  const states = [];
-  blocks.forEach((b, i) => {
-    const incremental = $('#modeSelect').value === 'G91';
+  return blocks.map((b, index) => {
+    const incremental = (b.mode ?? $('#modeSelect').value) === 'G91';
     ['x','y','z'].forEach(k => {
       if (b[k] !== undefined) pos[k] = incremental ? pos[k] + num(b[k]) : num(b[k]);
     });
-    states.push({ ...pos, type: b.type, index: i });
-  });
-  return index === undefined ? states : states[index];
-}
-
-function renderBlocks() {
-  blockList.innerHTML = blocks.map((b, i) => {
-    const meta = typeMeta[b.type];
-    const fields = ['x','y','z'].map(k => `<label class="field"><span>${k.toUpperCase()}</span><input data-key="${k}" type="number" step="0.25" value="${b[k] ?? ''}" placeholder="—" aria-label="${k.toUpperCase()} coordinate"></label>`).join('');
-    const extra = b.type === 'linear' ? `<label class="field"><span>F</span><input data-key="f" type="number" min="1" value="${b.f ?? ''}" placeholder="—" aria-label="Feed rate"></label>` : b.type.startsWith('arc') ? `<label class="field"><span>R</span><input data-key="r" type="number" step="0.25" value="${b.r ?? 1}" aria-label="Arc radius"></label>` : '';
-    const typeControl = b.type === 'rapid' || b.type === 'linear'
-      ? `<button type="button" class="badge motion-toggle" title="Toggle between G0 and G1" aria-label="Change ${meta.code} to ${b.type === 'rapid' ? 'G1' : 'G0'}"><span>${meta.code}</span><small>${meta.label}</small></button>`
-      : `<span class="badge">${meta.label}</span>`;
-    return `<div class="block ${selected === i ? 'selected' : ''}" data-index="${i}" tabindex="0"><span class="drag">··</span><span class="line-no">${String(i + 2).padStart(2,'0')}</span>${typeControl}<div class="fields">${fields}${extra}</div><button class="delete" aria-label="Delete block">×</button></div>`;
-  }).join('');
-  if (editorMode === 'blocks') $('#editorMeta').textContent = `${String(blocks.length).padStart(2,'0')} BLOCKS`;
-  bindBlockEvents();
-}
-
-function bindBlockEvents() {
-  document.querySelectorAll('.block').forEach(el => {
-    const index = Number(el.dataset.index);
-    el.addEventListener('click', e => {
-      if (e.target.closest('.delete')) {
-        blocks.splice(index, 1); selected = Math.min(selected, blocks.length - 1); render(); return;
-      }
-      if (e.target.closest('.motion-toggle')) {
-        blocks[index].type = blocks[index].type === 'rapid' ? 'linear' : 'rapid';
-        if (blocks[index].type === 'linear' && blocks[index].f === undefined) blocks[index].f = num($('#defaultFeed').value);
-        if (blocks[index].type === 'rapid') delete blocks[index].f;
-        selected = index; render(); return;
-      }
-      if (e.target.closest('input')) {
-        selected = index;
-        document.querySelectorAll('.block').forEach((block, i) => block.classList.toggle('selected', i === selected));
-        renderCode(); renderPlot(); return;
-      }
-      selected = index; render();
-    });
-    el.addEventListener('keydown', e => { if (e.key === 'Enter') { selected = index; render(); } });
-    el.querySelectorAll('input').forEach(input => input.addEventListener('input', e => {
-      e.stopPropagation(); const key = input.dataset.key;
-      if (input.value === '') delete blocks[index][key]; else blocks[index][key] = num(input.value);
-      selected = index; renderCode(); renderPlot();
-    }));
+    return { ...pos, type: b.type, r: b.r, index };
   });
 }
 
-function gcodeLines() {
+function programText(list) {
   const lines = [`G54 G17 ${$('#unitsSelect').value} ${$('#modeSelect').value}`];
-  blocks.forEach(b => {
-    const parts = [typeMeta[b.type].code];
+  list.forEach(b => {
+    const parts = [typeCode[b.type]];
     ['x','y','z','r','f'].forEach(k => { if (b[k] !== undefined) parts.push(k.toUpperCase() + fmt(b[k])); });
     lines.push(parts.join(' '));
   });
-  return lines;
-}
-
-function renderCode() {
-  const lines = gcodeLines();
-  $('#preambleCode').textContent = lines[0];
-  $('#codeEditor').value = lines.join('\n');
-  codeLineMap = blocks.map((_, i) => i + 1);
-  codeValid = true;
-  renderCodeHighlight(selected);
-  updateCodeStatus(lines.length);
+  return lines.join('\n');
 }
 
 function escapeHtml(value) {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function renderCodeHighlight(activeBlock = selected) {
-  const activeLine = codeLineMap[activeBlock];
-  const lines = $('#codeEditor').value.split(/\r?\n/);
-  $('#codeHighlight').innerHTML = lines.map((line, i) => `<span class="code-source-line ${i === activeLine ? 'active' : ''}">${escapeHtml(line) || ' '}</span>`).join('');
+function currentEditorLine() {
+  return editor.value.slice(0, editor.selectionStart).split(/\r?\n/).length - 1;
+}
+
+function editorHasFocus() { return document.activeElement === editor; }
+
+function activeBlockIndex() {
+  if (running) return selected;
+  return editorHasFocus() ? codeLineMap.indexOf(currentEditorLine()) : hoveredPathIndex;
+}
+
+function guidedContext() {
+  if (!editorHasFocus()) return null;
+  const caret = editor.selectionStart;
+  const lineStart = editor.value.lastIndexOf('\n', Math.max(0, caret - 1)) + 1;
+  const nextBreak = editor.value.indexOf('\n', caret);
+  const lineEnd = nextBreak === -1 ? editor.value.length : nextBreak;
+  const line = editor.value.slice(lineStart, lineEnd);
+  const beforeCaret = editor.value.slice(lineStart, caret);
+  const commandMatch = line.toUpperCase().match(/^\s*G0?([0-3])(?=\s|$)/);
+  if (!commandMatch) return null;
+  const command = `G${commandMatch[1]}`;
+  const present = new Set([...line.toUpperCase().matchAll(/([XYZFR])(?=\s|[-+.0-9]|$)/g)].map(match => match[1]));
+  const remaining = commandFields[command].filter(field => !present.has(field));
+  return {
+    lineIndex: editor.value.slice(0, lineStart).split(/\r?\n/).length - 1,
+    lineStart, lineEnd, line, beforeCaret,
+    command, remaining, nextField: remaining[0]
+  };
+}
+
+function renderCodeHighlight(activeBlock = activeBlockIndex()) {
+  const activeLine = editorHasFocus() ? currentEditorLine() : codeLineMap[activeBlock];
+  const lines = editor.value.split(/\r?\n/);
+  const guide = guidedContext();
+  $('#codeHighlight').innerHTML = lines.map((line, i) => {
+    const ghostText = guide && i === guide.lineIndex && guide.remaining.length ? (/\s$/.test(line) ? '' : ' ') + guide.remaining.join(' ') : '';
+    const ghost = ghostText ? `<span class="code-ghost">${escapeHtml(ghostText)}</span>` : '';
+    let body = escapeHtml(line);
+    if (codeError && codeError.line === i) {
+      const start = Math.min(codeError.start, line.length), end = Math.min(codeError.end, line.length);
+      body = `${escapeHtml(line.slice(0, start))}<span class="code-error">${escapeHtml(line.slice(start, end))}</span>${escapeHtml(line.slice(end))}`;
+    }
+    return `<span class="code-source-line ${i === activeLine ? 'active' : ''}">${body || ' '}${ghost}</span>`;
+  }).join('');
   syncCodeScroll();
 }
 
 function syncCodeScroll() {
-  $('#codeHighlight').scrollTop = $('#codeEditor').scrollTop;
-  $('#codeHighlight').scrollLeft = $('#codeEditor').scrollLeft;
+  $('#codeHighlight').scrollTop = editor.scrollTop;
+  $('#codeHighlight').scrollLeft = editor.scrollLeft;
 }
 
-function updateCodeStatus(lineCount, error = '') {
+function showError(message) {
   const status = $('#codeStatus');
-  status.textContent = error || `VALID · ${String(lineCount).padStart(2,'0')} LINES`;
-  status.classList.toggle('invalid', Boolean(error));
-  if (editorMode === 'code') $('#editorMeta').textContent = error ? 'CHECK CODE' : `${String(lineCount).padStart(2,'0')} LINES`;
+  status.textContent = message;
+  status.hidden = !message;
 }
 
-function parseCode(text) {
-  const lines = text.split(/\r?\n/);
-  const parsed = [];
-  const lineMap = [];
+// Errors carry the character range to underline in the editor.
+function fail(message, line, span) {
+  return { error: { message, line, start: span[0], end: span[1] } };
+}
+
+// Exact decimal for writing a value back into the code (no float noise, no trailing zeros).
+function numStr(v) { return String(Number(Number(v).toFixed(6))); }
+
+// X/Y/Z/F/R words. A word with no number, or with a lone "-", is a skip: it keeps the current value.
+const WORD = /(?<![A-Za-z])([XYZFR])(?:[ \t]*(-?(?:\d+(?:\.\d*)?|\.\d+))|[ \t]*-(?![\d.]))?/gi;
+const MOTION_TYPES = ['rapid', 'linear', 'arc-cw', 'arc-ccw'];
+
+function tokenize(masked) {
+  return [...masked.matchAll(WORD)].map(m => ({
+    key: m[1].toLowerCase(),
+    start: m.index,
+    end: m.index + m[0].length,
+    value: m[2] === undefined ? null : num(m[2])
+  }));
+}
+
+// Walks the program once, tracking the modal state (position, feed, distance mode) a skipped word falls back on.
+function analyze(text) {
+  const rawLines = text.split('\n');
   let units = $('#unitsSelect').value;
   let mode = $('#modeSelect').value;
-  for (let i = 0; i < lines.length; i++) {
-    const clean = lines[i].replace(/\([^)]*\)/g, '').replace(/;.*/, '').trim().toUpperCase();
+  const pos = { x: 0, y: 0, z: num($('#safeZ').value) };
+  let feed = null;
+  let error = null;
+  const infos = [];
+  for (let i = 0; i < rawLines.length; i++) {
+    // Comments become spaces so offsets still line up with the raw text.
+    const masked = rawLines[i].replace(/\([^)]*\)/g, m => ' '.repeat(m.length)).replace(/;.*/, m => ' '.repeat(m.length));
+    const clean = masked.trim().toUpperCase();
+    const info = { index: i, masked, kind: 'blank' };
+    infos.push(info);
     if (!clean) continue;
+    info.span = [Math.max(0, masked.search(/\S/)), masked.trimEnd().length];
     if (/(^|\s)G20(?=\s|$)/.test(clean)) units = 'G20';
     if (/(^|\s)G21(?=\s|$)/.test(clean)) units = 'G21';
     if (/(^|\s)G90(?=\s|$)/.test(clean)) mode = 'G90';
     if (/(^|\s)G91(?=\s|$)/.test(clean)) mode = 'G91';
-    const motion = clean.match(/(?:^|\s)G0?([0-3])(?=\s|$)/);
+    const motion = clean.match(/(?:^|\s)G0?([0-3])(?![\d.])/);
     const isSetup = /(^|\s)G(?:17|18|19|20|21|54|55|56|57|58|59|90|91)(?=\s|$)/.test(clean);
     if (!motion) {
-      if (isSetup) continue;
-      return { error: `LINE ${String(i + 1).padStart(2, '0')} · EXPECTED G0–G3` };
+      info.kind = isSetup ? 'setup' : 'bad';
+      if (!isSetup && !error) error = fail(`line ${i + 1} · expected G0–G3`, i, info.span);
+      continue;
     }
-    const type = motion[1] === '0' ? 'rapid' : motion[1] === '1' ? 'linear' : motion[1] === '2' ? 'arc-cw' : 'arc-ccw';
-    const block = { type };
-    const tokenPattern = /([XYZFR])\s*(-?(?:\d+(?:\.\d*)?|\.\d+))/g;
-    let token;
-    while ((token = tokenPattern.exec(clean))) block[token[1].toLowerCase()] = num(token[2]);
-    parsed.push(block);
-    lineMap.push(i);
+    info.kind = 'motion';
+    info.type = MOTION_TYPES[Number(motion[1])];
+    info.mode = mode;
+    info.tokens = tokenize(masked);
+    info.posBefore = { ...pos };
+    info.feedBefore = feed;
+    info.last = {};
+    info.tokens.forEach(t => { if (t.value !== null) info.last[t.key] = t; });
+    for (const k of ['x', 'y', 'z']) {
+      if (info.last[k]) pos[k] = mode === 'G91' ? pos[k] + info.last[k].value : info.last[k].value;
+    }
+    if (info.last.f) feed = info.last.f.value;
+    info.posAfter = { ...pos };
   }
-  return { blocks: parsed, units, mode, lineMap, lineCount: lines.filter(line => line.trim()).length };
+  return { infos, units, mode, error };
+}
+
+// The value a skipped word stands for, as text. null when there is nothing to keep.
+function resolveWord(info, key) {
+  if (key === 'x' || key === 'y' || key === 'z') return info.mode === 'G91' ? '0' : numStr(info.posBefore[key]);
+  if (key === 'f') return info.feedBefore === null ? null : numStr(info.feedBefore);
+  if (key === 'r' && (info.type === 'arc-cw' || info.type === 'arc-ccw')) {
+    const chord = Math.hypot(info.posAfter.x - info.posBefore.x, info.posAfter.y - info.posBefore.y);
+    return chord > 1e-9 ? numStr(Math.ceil(chord / 2 * 1e4) / 1e4) : null;
+  }
+  return null;
+}
+
+// Rewrites every skipped word ("Z -", a bare "X") as the value it stands for.
+// While the user is typing, the word under the caret is left alone: "X-" may still become "X-5".
+function normalizeText(text, caret, keepTyping) {
+  const { infos } = analyze(text);
+  const before = text.slice(0, caret);
+  const caretLine = before.split('\n').length - 1;
+  const caretCol = caret - (before.lastIndexOf('\n') + 1);
+  const edits = [];
+  let lineStart = 0;
+  for (const info of infos) {
+    const start0 = lineStart;
+    lineStart += info.masked.length + 1;
+    if (info.kind !== 'motion') continue;
+    for (const t of info.tokens) {
+      if (t.value !== null) continue;
+      if (keepTyping && info.index === caretLine) {
+        const tail = info.masked.slice(t.end);
+        const lastWord = tail.trim() === '';
+        const trailing = tail.length - tail.trimStart().length;
+        if (lastWord || (caretCol >= t.start && caretCol <= t.end + trailing)) continue;
+      }
+      // "X - X5": the later number wins, so the skip just goes away.
+      const superseded = info.tokens.some(o => o.key === t.key && o.value !== null);
+      const value = superseded ? null : resolveWord(info, t.key);
+      let start = start0 + t.start;
+      if (value === null) while (start > start0 && /[ \t]/.test(text[start - 1])) start--;
+      edits.push({ start, end: start0 + t.end, text: value === null ? '' : t.key.toUpperCase() + value });
+    }
+  }
+  if (!edits.length) return { text, caret, changed: false };
+  let out = '';
+  let cursor = 0;
+  let shift = 0;
+  let newCaret = null;
+  for (const e of edits) {
+    out += text.slice(cursor, e.start) + e.text;
+    cursor = e.end;
+    if (e.end <= caret) shift += e.text.length - (e.end - e.start);
+    else if (e.start < caret && newCaret === null) newCaret = out.length;
+  }
+  out += text.slice(cursor);
+  return { text: out, caret: newCaret ?? caret + shift, changed: true };
+}
+
+function parseCode(text) {
+  const { infos, units, mode, error } = analyze(text);
+  if (error) return error;
+  // Tool height runs from the safe height (in the air) down to 0 (cutting); outside that range is an error.
+  const safeZ = num($('#safeZ').value);
+  const EPS = 1e-9;
+  const parsed = [];
+  const lineMap = [];
+  for (const info of infos) {
+    if (info.kind !== 'motion') continue;
+    const at = k => (info.last[k] ? [info.last[k].start, info.last[k].end] : info.span);
+    for (const k of ['x', 'y']) {
+      const v = info.posAfter[k];
+      if (v < -EPS || v > SIZE + EPS) return fail(`line ${info.index + 1} · ${k.toUpperCase()} ${fmt(v)} outside ${SIZE} × ${SIZE}`, info.index, at(k));
+    }
+    const z = info.posAfter.z;
+    if (z < -EPS || z > safeZ + EPS) return fail(`line ${info.index + 1} · Z ${fmt(z)} must be from 0 to ${fmt(safeZ)}`, info.index, at('z'));
+    const block = { type: info.type, mode: info.mode };
+    for (const [k, t] of Object.entries(info.last)) block[k] = t.value;
+    parsed.push(block);
+    lineMap.push(info.index);
+  }
+  return { blocks: parsed, units, mode, lineMap };
 }
 
 function applyCodeInput() {
-  renderCodeHighlight(selected);
-  const result = parseCode($('#codeEditor').value);
+  const result = parseCode(editor.value);
   if (result.error) {
+    // Nothing is drawn until the code is fixed.
     codeValid = false;
-    updateCodeStatus(0, result.error);
+    codeError = result.error;
+    blocks = [];
+    codeLineMap = [];
+    selected = -1;
+    showError(result.error.message);
+    renderPlot();
+    renderCodeHighlight();
     return;
   }
   codeValid = true;
+  codeError = null;
+  showError('');
   blocks = result.blocks;
   codeLineMap = result.lineMap;
-  selected = Math.min(Math.max(selected, 0), blocks.length - 1);
+  selected = blocks.length - 1;
   $('#unitsSelect').value = result.units;
   $('#modeSelect').value = result.mode;
-  renderBlocks();
   renderPlot();
-  renderCodeHighlight(selected);
-  updateCodeStatus(result.lineCount);
-}
-
-function setEditorMode(mode) {
-  if (mode === 'blocks' && !codeValid) { toast('FIX CODE BEFORE SWITCHING'); $('#codeEditor').focus(); return; }
-  editorMode = mode;
-  const blocksMode = mode === 'blocks';
-  $('#blocksPane').hidden = !blocksMode;
-  $('#codePane').hidden = blocksMode;
-  $('#blocksTab').classList.toggle('active', blocksMode);
-  $('#codeTab').classList.toggle('active', !blocksMode);
-  $('#blocksTab').setAttribute('aria-selected', String(blocksMode));
-  $('#codeTab').setAttribute('aria-selected', String(!blocksMode));
-  if (blocksMode) $('#editorMeta').textContent = `${String(blocks.length).padStart(2,'0')} BLOCKS`;
-  else {
-    renderCode();
-    $('#editorMeta').textContent = `${String(gcodeLines().length).padStart(2,'0')} LINES`;
-    requestAnimationFrame(() => $('#codeEditor').focus());
-  }
+  renderCodeHighlight();
 }
 
 function renderPlot() {
+  hoveredPathIndex = -1;
   const states = stateAt();
-  const all = [{x:0,y:0}, ...states];
   const gridStep = Math.max(.01, num($('#gridStep').value) || 1);
-  const minX = Math.min(0, ...all.map(p => p.x)), maxX = Math.max(6, ...all.map(p => p.x));
-  const minY = Math.min(0, ...all.map(p => p.y)), maxY = Math.max(6, ...all.map(p => p.y));
-  const pad = 58, w = 600, h = 500;
-  const sx = x => pad + (x - minX) / Math.max(1, maxX - minX) * (w - pad * 2);
-  const sy = y => h - pad - (y - minY) / Math.max(1, maxY - minY) * (h - pad * 2);
-  let svg = `<rect width="600" height="500" fill="#fbfaf6"/>`;
-  const startX = Math.ceil(minX / gridStep) * gridStep;
-  const startY = Math.ceil(minY / gridStep) * gridStep;
-  for (let i = startX, n = 0; i <= maxX + gridStep / 100 && n < 100; i += gridStep, n++) { const v = Number(i.toFixed(6)); svg += `<line x1="${sx(v)}" y1="${pad}" x2="${sx(v)}" y2="${h-pad}" stroke="#ddd9d0" stroke-width="1"/><text x="${sx(v)}" y="${h-28}" text-anchor="middle" font-size="12" fill="#77736b" font-family="monospace">X${fmt(v)}</text>`; }
-  for (let i = startY, n = 0; i <= maxY + gridStep / 100 && n < 100; i += gridStep, n++) { const v = Number(i.toFixed(6)); svg += `<line x1="${pad}" y1="${sy(v)}" x2="${w-pad}" y2="${sy(v)}" stroke="#ddd9d0" stroke-width="1"/><text x="28" y="${sy(v)+4}" text-anchor="middle" font-size="12" fill="#77736b" font-family="monospace">Y${fmt(v)}</text>`; }
-  let prev = {x:0,y:0,z:num($('#safeZ').value)};
+  const S = 560, pad = 56, scale = (S - pad * 2) / SIZE;
+  const sx = x => pad + clamp(x) * scale;
+  const sy = y => S - pad - clamp(y) * scale;
+  let svg = `<rect width="${S}" height="${S}" fill="#fbfaf6"/>`;
+  for (let i = 0, n = 0; i <= SIZE + gridStep / 100 && n < 100; i += gridStep, n++) {
+    const v = Number(i.toFixed(6));
+    svg += `<line x1="${sx(v)}" y1="${pad}" x2="${sx(v)}" y2="${S - pad}" stroke="#ddd9d0" stroke-width="1"/><text x="${sx(v)}" y="${S - pad + 22}" text-anchor="middle" font-size="12" fill="#77736b" font-family="monospace">${fmt(v)}</text>`;
+    svg += `<line x1="${pad}" y1="${sy(v)}" x2="${S - pad}" y2="${sy(v)}" stroke="#ddd9d0" stroke-width="1"/><text x="${pad - 14}" y="${sy(v) + 4}" text-anchor="middle" font-size="12" fill="#77736b" font-family="monospace">${fmt(v)}</text>`;
+  }
+  let prev = { x: 0, y: 0 };
   let length = 0;
+  const activeIndex = activeBlockIndex();
   states.forEach((p, i) => {
-    const movedXY = p.x !== prev.x || p.y !== prev.y;
-    if (movedXY) {
-      const isRapid = p.type === 'rapid';
-      const active = i === selected;
-      const dist = Math.hypot(p.x-prev.x, p.y-prev.y); length += dist;
-      svg += `<line class="path-segment" data-index="${i}" x1="${sx(prev.x)}" y1="${sy(prev.y)}" x2="${sx(p.x)}" y2="${sy(p.y)}" stroke="${active ? '#e14b32' : isRapid ? '#6d86b4' : '#1b1b19'}" stroke-width="${active ? 5 : isRapid ? 2 : 3}" ${isRapid ? 'stroke-dasharray="7 6"' : ''} stroke-linecap="round"/>`;
+    if (p.x !== prev.x || p.y !== prev.y) {
+      // Z0 is a full-strength cut. At safe Z it is a thin blue line. In between the cut fades in
+      // proportion to how far up the tool is, from 25% just under safe Z up to 100% at Z0.
+      const safeZ = num($('#safeZ').value);
+      const atCut = Math.abs(p.z) < 1e-9;
+      const inAir = !atCut && Math.abs(p.z - safeZ) < 1e-9;
+      const opacity = atCut ? 1 : inAir ? 1 : .25 + .75 * (1 - p.z / safeZ);
+      const active = i === activeIndex;
+      const dist = Math.hypot(p.x - prev.x, p.y - prev.y);
+      const stroke = active ? '#e14b32' : inAir ? '#6d86b4' : '#1b1b19';
+      const strokeWidth = active ? 5 : inAir ? 2 : 3;
+      const fade = `stroke-opacity="${active ? 1 : opacity.toFixed(3)}"`;
+      let geometry;
+      if (p.type === 'arc-cw' || p.type === 'arc-ccw') {
+        const radius = Math.max(Math.abs(num(p.r)) || dist / 2, dist / 2);
+        const large = num(p.r) < 0 ? 1 : 0;
+        const sweep = p.type === 'arc-cw' ? 1 : 0;
+        const r = radius * scale;
+        geometry = `<path d="M ${sx(prev.x)} ${sy(prev.y)} A ${r} ${r} 0 ${large} ${sweep} ${sx(p.x)} ${sy(p.y)}"`;
+        const minor = 2 * Math.asin(Math.min(1, dist / (2 * radius)));
+        length += radius * (large ? 2 * Math.PI - minor : minor);
+      } else {
+        geometry = `<line x1="${sx(prev.x)}" y1="${sy(prev.y)}" x2="${sx(p.x)}" y2="${sy(p.y)}"`;
+        length += dist;
+      }
+      svg += `<g class="path-group" data-index="${i}">${geometry} class="path-hit"/>${geometry} class="path-visible" stroke="${stroke}" stroke-width="${strokeWidth}" ${fade} stroke-linecap="round"/></g>`;
     }
-    if (i === selected) svg += `<circle cx="${sx(p.x)}" cy="${sy(p.y)}" r="7" fill="#fbfaf6" stroke="#e14b32" stroke-width="3"/>`;
+    if (i === activeIndex) svg += `<circle cx="${sx(p.x)}" cy="${sy(p.y)}" r="7" fill="#fbfaf6" stroke="#e14b32" stroke-width="3"/><circle cx="${sx(p.x)}" cy="${sy(p.y)}" r="4" fill="#e14b32"/>`;
     prev = p;
   });
-  svg += `<circle id="toolDot" cx="${sx(states[selected]?.x ?? 0)}" cy="${sy(states[selected]?.y ?? 0)}" r="5" fill="#e14b32"/>`;
-  svg += `<path d="M${sx(0)-7} ${sy(0)}h14M${sx(0)} ${sy(0)-7}v14" stroke="#1b1b19" stroke-width="2"/><text x="${sx(0)+10}" y="${sy(0)-10}" font-size="11" fill="#1b1b19" font-family="monospace">ORIGIN</text>`;
+  svg += `<path d="M${sx(0) - 7} ${sy(0)}h14M${sx(0)} ${sy(0) - 7}v14" stroke="#1b1b19" stroke-width="2"/>`;
   plot.innerHTML = svg;
-  const current = states[selected] || {x:0,y:0,z:0};
-  $('#cursorReadout').innerHTML = `X ${num(current.x).toFixed(2)}&nbsp;&nbsp;Y ${num(current.y).toFixed(2)}`;
-  $('#zReadout').textContent = num(current.z).toFixed(2);
-  $('#pathLength').textContent = `${length.toFixed(1)} ${$('#unitsSelect').value === 'G20' ? 'IN' : 'MM'}`;
-  plot.querySelectorAll('.path-segment').forEach(seg => {
-    const selectSegment = () => {
-      selected = Number(seg.dataset.index);
-      plot.querySelectorAll('.path-segment').forEach(path => path.classList.toggle('hovered', path === seg));
-      document.querySelectorAll('.block').forEach((block, i) => block.classList.toggle('path-hover', i === selected));
-      renderCodeHighlight(selected);
-      const point = states[selected] || {x:0,y:0,z:0};
-      $('#cursorReadout').innerHTML = `X ${num(point.x).toFixed(2)}&nbsp;&nbsp;Y ${num(point.y).toFixed(2)}`;
-      $('#zReadout').textContent = num(point.z).toFixed(2);
-    };
-    seg.addEventListener('mouseenter', selectSegment);
-    seg.addEventListener('click', selectSegment);
+  showReadout(states[activeIndex >= 0 ? activeIndex : selected]);
+  $('#pathLength').textContent = !codeValid ? '' : `${length.toFixed(1)} ${$('#unitsSelect').value === 'G20' ? 'in' : 'mm'}`;
+  plot.querySelectorAll('.path-group').forEach(group => {
+    const index = Number(group.dataset.index);
+    group.addEventListener('mouseenter', () => {
+      if (editorHasFocus() || running) return;
+      hoveredPathIndex = index;
+      group.classList.add('hovered');
+      renderCodeHighlight(index);
+      showReadout(states[index]);
+    });
+    group.addEventListener('mouseleave', () => {
+      if (hoveredPathIndex !== index) return;
+      hoveredPathIndex = -1;
+      group.classList.remove('hovered');
+      renderCodeHighlight();
+      showReadout(states[selected]);
+    });
   });
 }
 
-function render() { renderBlocks(); renderCode(); renderPlot(); }
-function addBlock(type) {
-  const last = stateAt(blocks.length - 1) || {x:0,y:0,z:0};
-  const b = type === 'rapid' ? {type, x:last.x, y:last.y, z:last.z} : type === 'linear' ? {type, x:last.x, y:last.y, f:num($('#defaultFeed').value)} : {type, x:last.x + 1, y:last.y, r:1, f:num($('#defaultFeed').value)};
-  blocks.push(b); selected = blocks.length - 1; render();
-  setTimeout(() => blockList.lastElementChild?.scrollIntoView({behavior:'smooth',block:'center'}), 30);
+function showReadout(point) {
+  if (!codeValid) { $('#cursorReadout').textContent = ''; $('#zReadout').textContent = ''; return; }
+  const p = point || { x: 0, y: 0, z: num($('#safeZ').value) };
+  $('#cursorReadout').textContent = `X ${num(p.x).toFixed(2)}  Y ${num(p.y).toFixed(2)}`;
+  $('#zReadout').textContent = `Z ${num(p.z).toFixed(2)}`;
 }
-function toast(message) { const t=$('#toast'); t.textContent=message; t.classList.add('show'); clearTimeout(t._timer); t._timer=setTimeout(()=>t.classList.remove('show'),1800); }
-function currentCodeText() { return codeValid && $('#codeEditor').value.trim() ? $('#codeEditor').value.trim() : gcodeLines().join('\n'); }
 
-$('#commandList').addEventListener('click', e => { const b=e.target.closest('[data-type]'); if(b) addBlock(b.dataset.type); });
-$('#addLinear').addEventListener('click', () => addBlock('linear'));
-$('#blocksTab').addEventListener('click', () => setEditorMode('blocks'));
-$('#codeTab').addEventListener('click', () => setEditorMode('code'));
-$('#codeEditor').addEventListener('input', applyCodeInput);
-$('#codeEditor').addEventListener('scroll', syncCodeScroll);
-['unitsSelect','modeSelect','safeZ','defaultFeed','gridStep'].forEach(id => $('#'+id).addEventListener('input', render));
-$('#fitButton').addEventListener('click', () => { renderPlot(); toast('VIEW FIT TO TOOLPATH'); });
-$('#copyButton').addEventListener('click', async () => { await navigator.clipboard.writeText(currentCodeText()); toast('G-CODE COPIED'); });
+function insertAtEditor(text, start, end) {
+  editor.setSelectionRange(start, end);
+  if (!document.execCommand('insertText', false, text)) {
+    editor.setRangeText(text, start, end, 'end');
+    applyCodeInput();
+  }
+}
+
+let normalizing = false;
+
+// Writes resolved skips back into the editor. Returns true when the text changed.
+function normalizeEditor(force = false) {
+  const result = normalizeText(editor.value, editor.selectionStart, !force && editorHasFocus());
+  if (!result.changed) return false;
+  const scroll = editor.scrollTop;
+  normalizing = true;
+  editor.setSelectionRange(0, editor.value.length);
+  if (!(editorHasFocus() && document.execCommand('insertText', false, result.text))) editor.value = result.text;
+  editor.setSelectionRange(result.caret, result.caret);
+  editor.scrollTop = scroll;
+  normalizing = false;
+  applyCodeInput();
+  return true;
+}
+
+// A bare number typed after G0-G3 fills the next empty parameter (X, Y, Z...).
+function onCodeInput(e) {
+  if (normalizing) return;
+  const guide = guidedContext();
+  if (guide && guide.nextField && e.inputType?.startsWith('insert')) {
+    const caret = editor.selectionStart;
+    const atTokenEnd = caret === guide.lineEnd || /\s/.test(editor.value[caret]);
+    const token = guide.beforeCaret.match(/(?:^|\s)(-?\d*\.?\d*)$/);
+    if (token && token[1] && atTokenEnd) {
+      const before = guide.beforeCaret.slice(0, guide.beforeCaret.length - token[1].length).trimEnd();
+      // "G0 X 5": the number belongs to the label the user already typed.
+      if (before && !/[XYZFR]$/i.test(before)) {
+        insertAtEditor(guide.nextField + token[1], caret - token[1].length, caret);
+        return;
+      }
+    }
+  }
+  const pasted = e.inputType === 'insertFromPaste' || e.inputType === 'insertFromDrop';
+  if (!normalizeEditor(pasted)) applyCodeInput();
+}
+
+// Tab moves to the next letter: "G0 X5⇥" -> "G0 X5 Y".
+// Tab on an empty letter skips it by writing the value it keeps: "G0 X5 Y⇥" -> "G0 X5 Y2 Z".
+function onCodeKeydown(e) {
+  if (e.key !== 'Tab' || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
+  const guide = guidedContext();
+  if (!guide) return;
+  const empty = guide.beforeCaret.match(/(?:^|\s)([XYZFR])[ \t]*$/i);
+  if (!empty && !guide.nextField) return;
+  e.preventDefault();
+  const caret = editor.selectionStart;
+  if (empty) {
+    const key = empty[1].toLowerCase();
+    const info = analyze(editor.value).infos[guide.lineIndex];
+    const value = info.kind === 'motion' ? resolveWord(info, key) : null;
+    const lead = empty[0].length - empty[0].trimStart().length;
+    const filled = value === null ? '' : key.toUpperCase() + value;
+    const next = guide.nextField || '';
+    insertAtEditor(filled + (filled && next ? ' ' : '') + next, caret - (empty[0].length - lead), editor.selectionEnd);
+  } else {
+    const prefix = /\s$/.test(guide.beforeCaret) ? '' : ' ';
+    insertAtEditor(prefix + guide.nextField, caret, editor.selectionEnd);
+  }
+}
+
+function refreshActive() {
+  if (editorHasFocus()) normalizeEditor();
+  const index = activeBlockIndex();
+  if (index !== lastActiveIndex) { lastActiveIndex = index; renderPlot(); }
+  renderCodeHighlight();
+}
+
+// Units / distance selects rewrite the matching code in the text instead of regenerating it.
+function patchModal(pattern, code) {
+  const global = new RegExp(pattern.source, 'gi');
+  editor.value = pattern.test(editor.value)
+    ? editor.value.replace(global, (_, lead) => lead + code)
+    : `${code}\n${editor.value}`;
+  applyCodeInput();
+}
+
+function toast(message) { const t = $('#toast'); t.textContent = message; t.classList.add('show'); clearTimeout(t._timer); t._timer = setTimeout(() => t.classList.remove('show'), 1600); }
+function currentCodeText() { return editor.value.trim(); }
+
+editor.addEventListener('input', onCodeInput);
+editor.addEventListener('keydown', onCodeKeydown);
+editor.addEventListener('scroll', syncCodeScroll);
+editor.addEventListener('focus', refreshActive);
+editor.addEventListener('blur', () => { normalizeEditor(true); refreshActive(); });
+editor.addEventListener('keyup', refreshActive);
+editor.addEventListener('click', refreshActive);
+document.addEventListener('selectionchange', () => { if (editorHasFocus()) refreshActive(); });
+$('#unitsSelect').addEventListener('change', e => patchModal(/(^|\s)G(?:20|21)(?=\s|$)/, e.target.value));
+$('#modeSelect').addEventListener('change', e => patchModal(/(^|\s)G(?:90|91)(?=\s|$)/, e.target.value));
+$('#safeZ').addEventListener('input', applyCodeInput);
+$('#gridStep').addEventListener('input', renderPlot);
+$('#sideToggle').addEventListener('click', () => {
+  const collapsed = $('#side').classList.toggle('collapsed');
+  $('#sideToggle').setAttribute('aria-expanded', String(!collapsed));
+});
+$('#copyButton').addEventListener('click', async () => { await navigator.clipboard.writeText(currentCodeText()); toast('Copied'); });
 $('#exportButton').addEventListener('click', () => {
-  const blob = new Blob([currentCodeText()+'\n'], {type:'text/plain'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=($('#programName').textContent.trim()||'program').toLowerCase()+'.nc'; a.click(); URL.revokeObjectURL(a.href); toast('PROGRAM EXPORTED');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([currentCodeText() + '\n'], { type: 'text/plain' }));
+  a.download = 'program.nc';
+  a.click();
+  URL.revokeObjectURL(a.href);
 });
-$('#newButton').addEventListener('click', () => { blocks=[]; selected=-1; render(); toast('NEW PROGRAM'); });
+$('#newButton').addEventListener('click', () => { editor.value = programText([]); applyCodeInput(); editor.focus(); });
 $('#playButton').addEventListener('click', async () => {
-  if(running || !blocks.length) return; running=true; $('#playButton').textContent='■ STOP';
-  for(let i=0;i<blocks.length && running;i++){ selected=i; render(); await new Promise(r=>setTimeout(r,360)); }
-  running=false; $('#playButton').textContent='▶ RUN';
+  if (running) { running = false; return; }
+  if (!codeValid || !blocks.length) return;
+  running = true;
+  editor.blur();
+  $('#playButton').textContent = 'Stop';
+  for (let i = 0; i < blocks.length && running; i++) {
+    selected = i;
+    renderPlot();
+    renderCodeHighlight();
+    await new Promise(r => setTimeout(r, 360));
+  }
+  running = false;
+  selected = blocks.length - 1;
+  $('#playButton').textContent = 'Run';
+  renderPlot();
+  renderCodeHighlight();
 });
 
-render();
+editor.value = programText(initialBlocks);
+applyCodeInput();

@@ -1058,7 +1058,7 @@ $('#copyButton').addEventListener('click', async () => { await navigator.clipboa
 $('#exportButton').addEventListener('click', () => {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([currentCodeText() + '\n'], { type: 'text/plain' }));
-  a.download = 'program.nc';
+  a.download = 'program.txt';
   a.click();
   URL.revokeObjectURL(a.href);
 });
